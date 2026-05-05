@@ -162,4 +162,174 @@ for face in faces:
 
 ---
 
+---
+
+# 狗脸遮挡检测 (Dog Face Occlusion Detection) 技术调研
+
+> 针对单张静态图片的狗脸面部遮挡检测方案调研
+
+## 八、狗脸遮挡检测概述
+
+### 与人脸遮挡检测的差异
+
+| 维度 | 人脸遮挡检测 | 狗脸遮挡检测 |
+|---|---|---|
+| 遮挡物类型 | 口罩、墨镜、围巾等标准化物品 | 口套、帽子、毛发打结、脏污等，更随机 |
+| 面部形态差异 | 差异相对较小 | 120+ 品种，脸型、毛色差异巨大 |
+| 天然遮挡 | 较少 | 毛发本身就是天然"遮挡"，边界模糊 |
+| 标注数据集 | 丰富（CelebA、MAFA 等） | 几乎没有专门的遮挡数据集 |
+| 相关研究 | 成熟领域 | 非常冷门，几乎没有专门研究 |
+
+### 狗脸常见的遮挡类型
+
+- 口套/口罩 (muzzle)
+- 帽子/头饰 (hat/headwear)
+- 毛发遮挡/打结 (matted fur)
+- 脏污/异物 (dirt/foreign objects)
+- 眼罩/绷带 (eye patch/bandage)
+- 其他物体遮挡
+
+## 九、狗脸遮挡检测技术方案
+
+### 方案1: VLM 大模型直接判断（零样本，最快上手）
+
+- **思路**: 用 GPT-4o / Qwen-VL / LLaVA 等多模态模型直接判断
+- **Prompt 示例**:
+  ```
+  请判断图片中狗的面部是否有遮挡。
+  遮挡类型包括：口套/口罩、帽子/头饰、毛发遮挡、脏污、其他物体遮挡。
+  请回答：是否有遮挡（是/否），遮挡类型，遮挡部位。
+  ```
+- **优点**: 无需训练数据，零样本泛化能力强，可处理任意遮挡类型
+- **缺点**: 推理速度慢、API 成本高、可能产生幻觉
+- **适用**: 冷启动验证、数据标注辅助、非实时分析场景
+
+### 方案2: YOLO 检测 + 分类器（推荐落地方案）
+
+- **思路**:
+  1. YOLOv8/YOLO11 检测狗脸区域
+  2. 裁剪狗脸 → 送入 ResNet/EfficientNet 分类器
+  3. 输出类别: 无遮挡 / 眼部遮挡 / 口鼻遮挡 / 全遮挡
+- **训练数据来源**:
+  - 真实遮挡图片（口套、帽子、脏污等）
+  - 合成数据（正常狗脸上叠加遮挡 mask）
+  - 用 VLM 先标注一批作为种子数据
+- **优点**: 准确率高、速度快、适合生产部署
+- **缺点**: 需要标注数据，遮挡类型需预定义
+
+### 方案3: 关键点可见性推断遮挡 ⭐最推荐
+
+- **思路**:
+  1. 训练狗脸关键点检测模型（眼睛、鼻子、嘴巴等）
+  2. 关键点模型输出 (坐标, 置信度/可见性)
+  3. 如果关键部位关键点置信度极低 → 判定该区域被遮挡
+  4. 结合关键点几何关系异常进一步确认
+- **优点**: 天然与遮挡关联，能精确定位遮挡区域
+- **缺点**: 需要带关键点标注的狗脸数据
+- **适用**: 需要细粒度遮挡定位的场景
+
+### 方案4: 传统 CV 方法（轻量级）
+
+- **思路**:
+  1. Haar Cascade / HOG+SVM 检测狗脸
+  2. 颜色直方图、边缘检测、纹理分析判断遮挡
+  3. 检查眼部区域亮暗度（类似墨镜检测）
+- **优点**: 无需 GPU，极轻量
+- **缺点**: 泛化能力差、对光照角度敏感、准确率有限
+
+### 方案5: SAM 分割 + 分析（最精细化）
+
+- **思路**:
+  1. YOLO 检测狗脸区域
+  2. SAM / YOLOv8-Seg 对狗脸做语义分割
+  3. 分析分割结果中面部区域的完整性
+- **优点**: 可处理任意形状的遮挡
+- **缺点**: 系统复杂度高
+
+## 十、狗脸检测相关开源项目
+
+| 项目 | 用途 | Stars | 链接 |
+|---|---|---|---|
+| kwjinwoo/Dog_face_landmark_detection | 狗脸关键点检测 | 11 | [GitHub](https://github.com/kwjinwoo/Dog_face_landmark_detection) |
+| kskd1804/dog_face_haar_cascade | 狗脸检测（Haar 传统方法） | 5 | [GitHub](https://github.com/kskd1804/dog_face_haar_cascade) |
+| DeepLabCut | 动物姿态追踪 | 5000+ | [GitHub](https://github.com/DeepLabCut/DeepLabCut) |
+| MMPose | 统一姿态估计框架（支持动物关键点） | - | [GitHub](https://github.com/open-mmlab/mmpose) |
+| ultralytics (YOLOv8-Pose) | 检测 + 关键点联合框架 | - | [GitHub](https://github.com/ultralytics/ultralytics) |
+| menorashid/animal_human_kp | CVPR 2017 跨物种关键点 | 53 | [GitHub](https://github.com/menorashid/animal_human_kp) |
+
+### 相关论文
+
+| 论文 | 会议/年份 | 关键词 |
+|---|---|---|
+| Interspecies Knowledge Transfer for Facial Keypoint Detection | CVPR 2017 | 跨物种关键点，支持猫、狗等 |
+| Automated Detection of Cat Facial Landmarks | IJCV 2024 | 猫面部 48 关键点，方法可迁移到狗 |
+| Sheep Facial Pain Assessment Under Weighted Graph Neural Networks | FG 2025 | 图神经网络动物面部关键点 |
+| AnimalWeb: A Hierarchical Dataset of Animal Faces | - | 大规模动物面部数据集，68 关键点 |
+
+## 十一、狗脸相关数据集
+
+| 数据集 | 规模 | 标注内容 | 来源 |
+|---|---|---|---|
+| Stanford Dogs | 20,580 张 / 120 品种 | bounding box | [link](http://vision.stanford.edu/aditya86/ImageNetDogs/) |
+| Oxford-IIIT Pet | 7,349 张 / 37 品种 | 头部+身体部位像素级标注 | [link](https://www.robots.ox.ac.uk/~vgg/data/pets/) |
+| AnimalWeb | 21,955 张 / 334 物种 | 68 个面部关键点 | [link](https://arxiv.org/abs/1811.07021) |
+| StanfordExtra | 12,000 张 | 8 个身体关键点 | [GitHub](https://github.com/bbashirazizv/StanfordExtra) |
+| AP-10K | 10,015 张 / 23 物种 | 17 个关键点 | [GitHub](https://github.com/AlexTheBad/AP-10K) |
+
+## 十二、狗脸遮挡检测工程流水线
+
+```
+输入图片
+  ↓
+狗脸检测 (YOLOv8 / Haar Cascade)
+  ↓
+┌──────────────────────────────────────────┐
+│ 遮挡判断 (选以下一种或组合)              │
+│                                          │
+│  A. 关键点检测 → 关键点置信度低=被遮挡    │
+│                                          │
+│  B. 分类模型 → 直接输出遮挡类型           │
+│                                          │
+│  C. VLM 推理 → 自然语言描述遮挡情况       │
+│                                          │
+│  D. 分割模型 → 分析面部区域完整性         │
+└──────────────────────────────────────────┘
+  ↓
+输出: 是否遮挡 / 遮挡类型 / 遮挡区域
+```
+
+## 十三、推荐分阶段实施路径
+
+### 阶段一：快速验证（1-2 天）
+
+- 使用 VLM（GPT-4o / Qwen-VL）零样本判断狗脸是否遮挡
+- 同时用 VLM 标注一批数据作为种子训练集
+- 验证可行性，确定遮挡类型分类体系
+
+### 阶段二：落地部署（1-2 周）
+
+- YOLO 狗脸检测 + 关键点可见性判断遮挡
+- 用 VLM 生成的标注 + 合成数据训练模型
+- 轻量高效，适合生产环境
+
+### 阶段三：持续优化
+
+- 增加遮挡分类头 → 支持多类型遮挡识别
+- 合成数据增强 + 真实数据迭代
+- 建立专门的狗脸遮挡数据集
+
+## 十四、狗脸遮挡检测方案选择建议
+
+| 场景 | 推荐方案 |
+|---|---|
+| 快速验证可行性 | VLM 零样本推理 |
+| 区分遮挡类型 | YOLO + 多分类 CNN |
+| 精确定位遮挡区域 | 关键点可见性推断 |
+| 极轻量嵌入式部署 | 传统 CV（Haar + 纹理分析） |
+| 最精细遮挡分析 | SAM 分割 + 区域分析 |
+
+**总结**: 狗脸遮挡检测目前没有专门研究，建议组合"狗脸检测 + 关键点可见性 + VLM 辅助标注"的方案。VLM 适合冷启动和数据标注，关键点方案适合生产部署。
+
+---
+
 *调研时间: 2026-05-04*
